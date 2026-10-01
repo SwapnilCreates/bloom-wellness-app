@@ -5,7 +5,6 @@ import {
   ArrowRight,
   BarChart3,
   Brain,
-  Check,
   CloudSun,
   Droplets,
   Flower2,
@@ -13,8 +12,8 @@ import {
   Home,
   MoonStar,
   NotebookPen,
+  Send,
   Sparkles,
-  Star,
   UserRound,
   Watch,
   Zap,
@@ -23,6 +22,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'bloom-data-v1';
 const THEME_KEY = 'bloom-theme-v1';
+const PARTNER_EMAIL_KEY = 'bloom-partner-email-v1';
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 
 const THEMES = {
@@ -150,7 +150,6 @@ const defaultTracker: TrackerData = {
 const moodLabels = ['Very Bad', 'Low', 'Neutral', 'Good', 'Great'];
 const energyLabels = ['Exhausted', 'Low', 'Okay', 'Good', 'Energetic'];
 const stressLabels = ['Calm', 'A bit', 'Okay', 'High', 'Overloaded'];
-const overthinkingLabels = ['Peaceful', 'A Little', 'A Lot'];
 const sleepQualityLabels = ['Poor', 'Below Average', 'Okay', 'Good', 'Excellent'];
 
 const getDateKey = (date: Date = new Date()) => date.toISOString().slice(0, 10);
@@ -170,14 +169,6 @@ const formatHours = (value: number) => {
   return `${value.toFixed(1)}h`;
 };
 
-const formatMinutes = (value: number) => {
-  const hours = Math.floor(value / 60);
-  const minutes = value % 60;
-  if (hours && minutes) return `${hours}h ${minutes}m`;
-  if (hours) return `${hours}h`;
-  return `${minutes}m`;
-};
-
 const getProductivityStatus = (total: number) => {
   if (total === 0) return { label: '🌙 Rest Day', color: '#d9c4f2' };
   if (total >= 0.5 && total <= 1.5) return { label: '🌱 Small Progress', color: '#f7caa8' };
@@ -186,12 +177,44 @@ const getProductivityStatus = (total: number) => {
   return { label: '👑 Productivity Queen', color: '#f1c76f' };
 };
 
+const buildDailySummary = (
+  entry: TrackerData,
+  hydrationGoal: number,
+  totalProductiveHours: number,
+  wellnessScore: number,
+) => {
+  const mealText = [entry.breakfast, entry.lunch, entry.dinner].filter(Boolean).length;
+  const moodText = moodLabels[Math.max(0, Math.min(moodLabels.length - 1, entry.mood - 1))];
+  const sleepText = sleepQualityLabels[Math.max(0, Math.min(sleepQualityLabels.length - 1, entry.sleepQuality - 1))];
+
+  return [
+    '💝 Your girl’s Bloom report 🌸',
+    '',
+    `Wellness Score: ${wellnessScore}/100`,
+    `Productivity: ${totalProductiveHours.toFixed(1)}h`,
+    `Mood: ${moodText}`,
+    `Water: ${entry.water}/${hydrationGoal} glasses`,
+    `Sleep: ${formatHours(entry.sleepHours)} • ${sleepText}`,
+    `Meals: ${mealText}/3 eaten`,
+    `Activity: ${entry.activity} min`,
+    `Screen Time: ${entry.screenTime}h`,
+    `Phone Before Sleep: ${entry.phoneBeforeSleep ? 'Avoided it' : 'Used it'}`,
+    `Study: ${formatHours(entry.study)}`,
+    `Editing: ${formatHours(entry.editing)}`,
+    `Fruit & Veg: ${entry.fruits ? 'Yes' : 'Not today'}`,
+    '',
+    'You are doing amazing. Keep blooming. 🌷',
+  ].join('\n');
+};
+
 function App() {
   const [themeKey, setThemeKey] = useState<ThemeKey>('blossom');
   const [tab, setTab] = useState<TabKey>('home');
   const [selectedDate, setSelectedDate] = useState(getDateKey());
   const [entries, setEntries] = useState<Record<string, TrackerData>>({});
   const [hydrationGoal, setHydrationGoal] = useState(8);
+  const [partnerEmail, setPartnerEmail] = useState('');
+  const [reportStatus, setReportStatus] = useState('');
   const [showCelebration, setShowCelebration] = useState(false);
 
   const theme = THEMES[themeKey];
@@ -199,7 +222,11 @@ function App() {
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     const savedTheme = localStorage.getItem(THEME_KEY);
+    const savedPartnerEmail = localStorage.getItem(PARTNER_EMAIL_KEY);
+
     if (savedTheme && savedTheme in THEMES) setThemeKey(savedTheme as ThemeKey);
+    if (savedPartnerEmail) setPartnerEmail(savedPartnerEmail);
+
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -214,6 +241,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, themeKey);
   }, [themeKey]);
+
+  useEffect(() => {
+    localStorage.setItem(PARTNER_EMAIL_KEY, partnerEmail);
+  }, [partnerEmail]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -242,7 +273,6 @@ function App() {
 
   const completionData = useMemo(() => {
     const values = currentEntry;
-    const total = 18;
     let complete = 0;
 
     if (values.water > 0) complete += 1;
@@ -267,9 +297,8 @@ function App() {
     if (values.editing >= 0) complete += 1;
 
     return {
-      percentage: Math.min(Math.round((complete / total) * 100), 100),
+      percentage: Math.min(Math.round((complete / 20) * 100), 100),
       complete,
-      total,
     };
   }, [currentEntry]);
 
@@ -304,8 +333,7 @@ function App() {
       const key = getDateKey(current);
       if (entries[key]) {
         count += 1;
-      } else {
-        if (i === 0) continue;
+      } else if (i > 0) {
         break;
       }
     }
@@ -322,13 +350,49 @@ function App() {
   }, [streakCount]);
 
   const greeting = getTodayGreeting();
-
   const themeSwatches = Object.keys(THEMES) as ThemeKey[];
 
   const handleCompleteCheckIn = () => {
     setShowCelebration(true);
     setTab('home');
     setTimeout(() => setShowCelebration(false), 2600);
+  };
+
+  const handleSendToPartner = async () => {
+    if (!partnerEmail.trim()) {
+      setReportStatus('Add your partner email in profile first 💌');
+      setTab('profile');
+      return;
+    }
+
+    const summary = buildDailySummary(currentEntry, hydrationGoal, totalProductiveHours, wellnessScore);
+    setReportStatus('Sending your daily report...');
+
+    try {
+      const response = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: partnerEmail,
+          report: summary,
+          subject: `Your girl’s Bloom update for ${new Date(selectedDate).toLocaleDateString()}`,
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (payload.success) {
+        setReportStatus('Daily report sent to your boyfie ✨');
+      } else {
+        const mailtoLink = `mailto:${partnerEmail}?subject=${encodeURIComponent('Your girl’s Bloom update 🌸')}&body=${encodeURIComponent(summary)}`;
+        window.location.href = mailtoLink;
+        setReportStatus('Email app opened — send it from there 💌');
+      }
+    } catch (error) {
+      const mailtoLink = `mailto:${partnerEmail}?subject=${encodeURIComponent('Your girl’s Bloom update 🌸')}&body=${encodeURIComponent(summary)}`;
+      window.location.href = mailtoLink;
+      setReportStatus('Couldn’t send automatically, so your email app opened instead 💌');
+    }
   };
 
   const currentMood = moodLabels[clamp(currentEntry.mood - 1, 0, moodLabels.length - 1)] || 'Neutral';
@@ -438,7 +502,7 @@ function App() {
               <QuickCard icon={<Droplets size={18} />} label="Water" value={`${currentEntry.water} / ${hydrationGoal}`} color={theme.primary} />
               <QuickCard icon={<MoonStar size={18} />} label="Sleep" value={formatHours(currentEntry.sleepHours)} color={theme.secondary} />
               <QuickCard icon={<NotebookPen size={18} />} label="Study" value={formatHours(currentEntry.study)} color={theme.accent} />
-              <QuickCard icon={<MonitorIcon />} label="Mood" value={currentMood} color={theme.primary} />
+              <QuickCard icon={<CloudSun size={18} />} label="Mood" value={currentMood} color={theme.primary} />
             </section>
 
             <motion.button
@@ -453,6 +517,20 @@ function App() {
               </div>
               <ArrowRight size={22} />
             </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              onClick={handleSendToPartner}
+              className="flex w-full items-center justify-center gap-2 rounded-[28px] border border-white/50 px-5 py-4 text-base font-bold shadow-soft"
+              style={{ background: `linear-gradient(135deg, ${theme.cardStrong} 0%, ${theme.card} 100%)`, color: theme.text }}
+            >
+              <Send size={18} />
+              Let your boyfie know 🌷
+            </motion.button>
+
+            {reportStatus && (
+              <p className="text-center text-sm" style={{ color: theme.muted }}>{reportStatus}</p>
+            )}
 
             <section className="rounded-[30px] border border-white/50 p-4 shadow-soft" style={{ background: theme.card }}>
               <div className="mb-3 flex items-center justify-between">
@@ -580,8 +658,8 @@ function App() {
             <div className="grid grid-cols-2 gap-3">
               <InfoCard label="Wellness Score" value={`${wellnessScore}/100`} accent={theme.primary} />
               <InfoCard label="Streak" value={`${streakCount} days`} accent={theme.secondary} />
-              <InfoCard label="Study" value={formatHours(Object.values(entries).reduce((sum, item) => sum + (item?.study || 0), 0))} accent={theme.accent} />
-              <InfoCard label="Sleep" value={formatHours(Object.values(entries).reduce((sum, item) => sum + (item?.sleepHours || 0), 0) / Math.max(Object.keys(entries).length, 1))} accent={theme.primary} />
+              <InfoCard label="Study" value={formatHours(recentDates.reduce((sum, key) => sum + (entries[key]?.study || 0), 0))} accent={theme.accent} />
+              <InfoCard label="Avg Sleep" value={formatHours(recentDates.length ? recentDates.reduce((sum, key) => sum + (entries[key]?.sleepHours || 0), 0) / recentDates.length : 0)} accent={theme.primary} />
             </div>
 
             <section className="rounded-[30px] border border-white/50 p-4 shadow-soft" style={{ background: theme.card }}>
@@ -650,6 +728,28 @@ function App() {
             </section>
 
             <section className="rounded-[30px] border border-white/50 p-4 shadow-soft" style={{ background: theme.card }}>
+              <p className="mb-3 text-lg font-bold" style={{ color: theme.text }}>Your Boyfie</p>
+              <label className="mb-2 block text-sm" style={{ color: theme.muted }}>Partner email</label>
+              <input
+                type="email"
+                value={partnerEmail}
+                onChange={(e) => setPartnerEmail(e.target.value)}
+                placeholder="boyfriend@example.com"
+                className="w-full rounded-[22px] border border-white/50 px-3 py-3 outline-none"
+                style={{ background: theme.cardStrong, color: theme.text }}
+              />
+              <button
+                onClick={handleSendToPartner}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[22px] px-4 py-3 text-sm font-semibold"
+                style={{ background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`, color: '#fff' }}
+              >
+                <Send size={16} />
+                Send today’s report
+              </button>
+              {reportStatus && <p className="mt-3 text-sm" style={{ color: theme.muted }}>{reportStatus}</p>}
+            </section>
+
+            <section className="rounded-[30px] border border-white/50 p-4 shadow-soft" style={{ background: theme.card }}>
               <p className="mb-3 text-lg font-bold" style={{ color: theme.text }}>Theme Library</p>
               <div className="grid grid-cols-2 gap-3">
                 {themeSwatches.map((item) => (
@@ -671,16 +771,6 @@ function App() {
                   </button>
                 ))}
               </div>
-            </section>
-
-            <section className="rounded-[30px] border border-white/50 p-4 shadow-soft" style={{ background: theme.card }}>
-              <p className="mb-3 text-lg font-bold" style={{ color: theme.text }}>Tiny Wins</p>
-              <ul className="space-y-2 text-sm" style={{ color: theme.muted }}>
-                <li>🌸 Keep it gentle, not perfect.</li>
-                <li>💧 Hydration helps you bloom.</li>
-                <li>🌙 Sleep is power.</li>
-                <li>✨ Your garden grows with consistency.</li>
-              </ul>
             </section>
           </div>
         )}
@@ -956,10 +1046,6 @@ function InfoCard({ label, value, accent }: { label: string; value: string; acce
       <p className="mt-2 text-2xl font-bold" style={{ color: '#6e3b53' }}>{value}</p>
     </div>
   );
-}
-
-function MonitorIcon() {
-  return <Sparkles size={18} />;
 }
 
 export default App;
